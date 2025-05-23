@@ -31,6 +31,8 @@ function TaskBoard() {
   const { tasks, isLoading } = useSelector((state) => state.tasks);
   const { user } = useSelector((state) => state.auth);
   const [open, setOpen] = useState(false);
+  const [localTasks, setLocalTasks] = useState([]);
+
   const [selectedTask, setSelectedTask] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
@@ -42,6 +44,13 @@ function TaskBoard() {
   useEffect(() => {
     dispatch(fetchTasks());
   }, [dispatch]);
+
+  useEffect(() => {
+    if (tasks) {
+      setLocalTasks(tasks);
+    }
+  }, [tasks]);
+
 
    const handleOpen = (task = null) => {
     if (task) {
@@ -123,38 +132,54 @@ function TaskBoard() {
     return columns;
   };
 
-  const onDragEnd = (result) => {
-    if (!result.destination) return;
+const onDragEnd = (result) => {
+  if (!result.destination) return;
 
-    const { source, destination } = result;
-    const task = tasks.find((t) => t._id === result.draggableId);
+  const { source, destination, draggableId } = result;
 
-    if (!task) {
-      console.error('Task not found:', result.draggableId);
-      return;
-    }
+  const updatedTasks = [...localTasks];
+  const taskIndex = updatedTasks.findIndex((t) => t._id === draggableId);
+  if (taskIndex === -1) return;
 
-    if (source.droppableId !== destination.droppableId) {
-      console.log(
-        'Drag action: moved task id',
-        task._id,
-        'from',
-        source.droppableId,
-        'to',
-        destination.droppableId
-      );
-      
-      const newStatus = destination.droppableId;
-      dispatch(
-        updateTask({
-          id: task._id,
-          taskData: { ...task, status: newStatus },
-        })
-      );
-    }
+  // Update local state first
+  const updatedTask = {
+    ...updatedTasks[taskIndex],
+    status: destination.droppableId,
   };
+  updatedTasks[taskIndex] = updatedTask;
+  setLocalTasks(updatedTasks); // 👈 Optimistic UI update
 
-  const tasksByStatus = getTasksByStatus();
+  // Dispatch to backend
+  dispatch(updateTask({ id: draggableId, taskData: updatedTask }));
+};
+
+
+  const getTasksByStatusFromLocal = () => {
+    const statuses = ['todo', 'in-progress', 'completed'];
+    const columns = {};
+
+    statuses.forEach((status) => {
+      columns[status] = {
+        title:
+          status === 'todo'
+            ? 'To Do'
+            : status === 'in-progress'
+            ? 'In Progress'
+            : 'Completed',
+        items: [],
+      };
+    });
+
+    localTasks.forEach((task) => {
+      const status = task.status || 'todo';
+      if (columns[status]) {
+        columns[status].items.push(task);
+      }
+    });
+
+    return columns;
+  };
+  const tasksByStatus = getTasksByStatusFromLocal();
 
   return (
     <Box sx={{ p: 3 }}>
@@ -188,6 +213,7 @@ function TaskBoard() {
               <Typography variant="h6" sx={{ mb: 2 }}>
                 {column.title} ({column.items.length})
               </Typography>
+              
               <Droppable droppableId={columnId}>
                 {(provided, snapshot) => (
                   <Box
@@ -203,8 +229,7 @@ function TaskBoard() {
                   >
                     {column.items.map((task, index) => (
                       <Draggable
-                        key={task._id}
-                        draggableId={task._id}
+                        key={String(task._id)} draggableId={String(task._id)}
                         index={index}
                       >
                         {(provided, snapshot) => (
